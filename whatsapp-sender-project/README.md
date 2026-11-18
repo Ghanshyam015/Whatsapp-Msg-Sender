@@ -10,11 +10,13 @@ A starter admin app for consent-based WhatsApp Business Cloud API campaigns.
 - Public HTTPS URL for production webhooks
 
 ## Setup
-1. Copy `.env.example` to `server/.env` and fill in the values.
+1. Copy `.env.example` to `server/.env` and fill in the values. Replace all example credentials, especially `JWT_SECRET`, `ADMIN_PASSWORD`, and `WEBHOOK_VERIFY_TOKEN`.
 2. Start MongoDB and Redis.
 3. In `server/`: `npm install`, then `npm run dev`.
 4. In `client/`: `npm install`, then `npm run dev`.
 5. Open http://localhost:5173 and sign in using `ADMIN_EMAIL` / `ADMIN_PASSWORD` from server `.env`.
+
+In development, the client sends API requests through Vite's `/api` proxy, which targets the backend port in `server/.env` (or port 4000 if unset). Set `VITE_API_PROXY_TARGET` to override the proxy target. For deployments where the API is on another origin, set `VITE_API_URL` to its `/api` URL. Sign-in and protected pages verify the session with the backend; contact and campaign requests send the same bearer token.
 
 For production, set `CLIENT_ORIGIN`, use HTTPS, use a strong random JWT secret, protect the server and Redis, and run the worker as a separate process (`npm run worker`).
 
