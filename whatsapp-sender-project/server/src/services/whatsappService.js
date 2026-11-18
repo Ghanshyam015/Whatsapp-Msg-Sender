@@ -11,5 +11,7 @@ export async function sendApprovedTemplate({ to, templateName, languageCode = "e
     type: "template",
     template: { name: templateName, language: { code: languageCode }, ...(components.length ? { components } : {}) }
   }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, "Content-Type": "application/json" }, timeout: 20000 });
-  return response.data?.messages?.[0]?.id;
+  const messageId = response.data?.messages?.[0]?.id;
+  if (!messageId) throw new Error("WhatsApp Cloud API did not return a message ID");
+  return messageId;
 }

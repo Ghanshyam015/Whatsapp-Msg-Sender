@@ -1,20 +1,58 @@
-import React, { useEffect, useState } from "react";
-import { NavLink, Routes, Route, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, Send, Settings, LogOut, RefreshCw, Plus, MessageCircle, CheckCircle, AlertCircle } from "lucide-react";
-import api from "./services/api";
+import { useEffect, useState } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
+import AuthPage from "./pages/AuthPage.jsx";
+import DashboardPages from "./pages/DashboardPages.jsx";
+import PublicPages from "./pages/PublicPages.jsx";
+import DashboardLayout from "./layouts/DashboardLayout.jsx";
+import api from "./services/api.js";
 
-function Login({ onLogin }) {
-  const [email,setEmail]=useState("admin@example.com"), [password,setPassword]=useState(""), [error,setError]=useState("");
-  async function submit(e){e.preventDefault();try{const {data}=await api.post("/auth/login",{email,password});localStorage.setItem("token",data.token);onLogin(true);}catch{setError("Login failed. Check server ADMIN_EMAIL and ADMIN_PASSWORD.");}}
-  return <div className="login"><form className="panel loginbox" onSubmit={submit}><div className="brand"><MessageCircle/> WhatsApp Sender</div><h1>Admin login</h1><label>Email</label><input value={email} onChange={e=>setEmail(e.target.value)}/><label>Password</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)}/>{error&&<p className="error">{error}</p>}<button className="primary">Sign in</button></form></div>
+function ProtectedApp() {
+  const [status, setStatus] = useState("checking");
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setStatus("unauthenticated");
+      return () => { active = false; };
+    }
+
+    api.get("/auth/me")
+      .then(() => { if (active) setStatus("authenticated"); })
+      .catch(error => {
+        if (!active) return;
+        if (error.response?.status === 401 || error.response?.status === 403) {
+          localStorage.removeItem("token");
+          setStatus("unauthenticated");
+        } else {
+          setStatus("error");
+        }
+      });
+
+    return () => { active = false; };
+  }, [retry]);
+
+  if (status === "unauthenticated") return <Navigate to="/login" replace />;
+  if (status === "checking") return <div role="status">Checking your session…</div>;
+  if (status === "error") {
+    return <div role="alert">
+      Could not verify your session. Check the API connection and try again.{" "}
+      <button onClick={() => { setStatus("checking"); setRetry(value => value + 1); }}>Retry</button>
+    </div>;
+  }
+  return <DashboardLayout><DashboardPages /></DashboardLayout>;
 }
-function Shell({children,onLogout}) {
-  return <div className="layout"><aside><div className="brand"><MessageCircle/> SenderDesk</div><nav><NavLink to="/"><LayoutDashboard/> Dashboard</NavLink><NavLink to="/contacts"><Users/> Contacts</NavLink><NavLink to="/campaigns"><Send/> Campaigns</NavLink><NavLink to="/settings"><Settings/> Setup</NavLink></nav><button className="logout" onClick={onLogout}><LogOut/> Sign out</button></aside><main><header><div><span className="muted">WORKSPACE / WHATSAPP</span><h2>Messaging console</h2></div><span className="pill"><i/> Cloud API</span></header>{children}</main></div>
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<AuthPage mode="login" />} />
+      <Route path="/register" element={<AuthPage mode="register" />} />
+      <Route path="/forgot-password" element={<AuthPage mode="forgot" />} />
+      <Route path="/verify" element={<AuthPage mode="verify" />} />
+      <Route path="/app/*" element={<ProtectedApp />} />
+      <Route path="/*" element={<PublicPages />} />
+    </Routes>
+  );
 }
-function Dashboard(){const [stats,setStats]=useState({contacts:0,campaigns:[]});const [err,setErr]=useState("");async function load(){try{const [c,p]=await Promise.all([api.get("/contacts"),api.get("/campaigns")]);setStats({contacts:c.data.total,campaigns:p.data.campaigns});setErr("");}catch{setErr("Could not load data.");}}useEffect(()=>{load()},[]);const sent=stats.campaigns.reduce((n,c)=>n+c.accepted,0),failed=stats.campaigns.reduce((n,c)=>n+c.failed,0);return <><div className="pagehead"><div><h1>Dashboard</h1><p>Overview of your WhatsApp campaigns.</p></div><button onClick={load}><RefreshCw size={16}/> Refresh</button></div>{err&&<p className="error">{err}</p>}<div className="stats"><Stat icon={<Users/>} label="Contacts" value={stats.contacts}/><Stat icon={<Send/>} label="Accepted by Meta" value={sent}/><Stat icon={<AlertCircle/>} label="Failed" value={failed}/><Stat icon={<MessageCircle/>} label="Campaigns" value={stats.campaigns.length}/></div><section className="panel"><h3>Recent campaigns</h3><CampaignList campaigns={stats.campaigns.slice(0,8)}/></section></>}
-function Stat({icon,label,value}){return <div className="panel stat"><div className="staticon">{icon}</div><div className="muted">{label}</div><strong>{value}</strong></div>}
-function CampaignList({campaigns}){return <div className="tablewrap"><table><thead><tr><th>Campaign</th><th>Template</th><th>Status</th><th>Accepted</th><th>Failed</th></tr></thead><tbody>{campaigns.map(c=><tr key={c._id}><td>{c.name}</td><td>{c.templateName}</td><td><span className="tag">{c.status}</span></td><td>{c.accepted}/{c.total}</td><td>{c.failed}</td></tr>)}{!campaigns.length&&<tr><td colSpan="5" className="muted">No campaigns yet.</td></tr>}</tbody></table></div>}
-function Contacts(){const [contacts,setContacts]=useState([]),[form,setForm]=useState({name:"",phone:"",consentSource:"Website signup"}),[message,setMessage]=useState("");async function load(){const {data}=await api.get("/contacts");setContacts(data.contacts);}useEffect(()=>{load()},[]);async function add(e){e.preventDefault();try{await api.post("/contacts",{...form,optedIn:true,consentedAt:new Date().toISOString()});setForm({name:"",phone:"",consentSource:"Website signup"});setMessage("Contact saved.");load();}catch(e){setMessage(e.response?.data?.error||"Could not save contact.");}}async function optout(id){await api.post(`/contacts/${id}/opt-out`);load();}return <><div className="pagehead"><div><h1>Contacts</h1><p>Only contacts with documented WhatsApp opt-in can receive campaigns.</p></div></div><section className="panel"><h3>Add opted-in contact</h3><form className="inlineform" onSubmit={add}><input placeholder="Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/><input placeholder="Phone e.g. 919876543210" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} required/><input placeholder="Consent source" value={form.consentSource} onChange={e=>setForm({...form,consentSource:e.target.value})} required/><button className="primary"><Plus size={16}/> Add</button></form>{message&&<p className="muted">{message}</p>}</section><section className="panel"><h3>Contact list ({contacts.length})</h3><div className="tablewrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Opt-in</th><th>Consent source</th><th>Action</th></tr></thead><tbody>{contacts.map(c=><tr key={c._id}><td>{c.name||"—"}</td><td>{c.phone}</td><td>{c.optedIn?"Yes":"No"}</td><td>{c.consentSource||"—"}</td><td>{c.optedIn&&<button className="small danger" onClick={()=>optout(c._id)}>Opt out</button>}</td></tr>)}</tbody></table></div></section></>}
-function Campaigns(){const [campaigns,setCampaigns]=useState([]),[form,setForm]=useState({name:"",templateName:"",languageCode:"en_US"}),[message,setMessage]=useState("");async function load(){const {data}=await api.get("/campaigns");setCampaigns(data.campaigns);}useEffect(()=>{load()},[]);async function create(e){e.preventDefault();setMessage("Queueing campaign…");try{const {data}=await api.post("/campaigns",form);setMessage(`Campaign queued: ${data.campaign.total} opted-in contacts.`);setForm({name:"",templateName:"",languageCode:"en_US"});load();}catch(e){setMessage(e.response?.data?.error||"Could not create campaign.");}}return <><div className="pagehead"><div><h1>Campaigns</h1><p>Send an approved WhatsApp template to opted-in contacts.</p></div></div><section className="panel"><h3>Create campaign</h3><form className="campaignform" onSubmit={create}><label>Campaign name</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="November announcement" required/><label>Approved template name</label><input value={form.templateName} onChange={e=>setForm({...form,templateName:e.target.value})} placeholder="e.g. hello_world" pattern="[a-z0-9_]+" required/><label>Template language</label><input value={form.languageCode} onChange={e=>setForm({...form,languageCode:e.target.value})}/><p className="muted">Use the exact approved template name and language from WhatsApp Manager. This starter supports templates without dynamic variables.</p><button className="primary"><Send size={16}/> Queue campaign</button></form>{message&&<p className="muted">{message}</p>}</section><section className="panel"><h3>Campaign history</h3><CampaignList campaigns={campaigns}/></section></>}
-function SettingsPage(){return <section className="panel"><h1>Setup</h1><p>Configure Meta credentials in <code>server/.env</code>. Never put access tokens in React or expose them to the browser.</p><ol><li>Create a Meta Business app and add WhatsApp.</li><li>Connect your WhatsApp Business Account and phone number.</li><li>Set the access token and phone number ID in the backend environment.</li><li>Create and get approval for a message template.</li><li>Configure the public HTTPS webhook URL at <code>/api/webhooks/whatsapp</code>.</li><li>Subscribe the app to the <code>messages</code> webhook field.</li></ol><p className="muted">Use a permanent/system-user token for production and rotate secrets securely.</p></section>}
-export default function App(){const [logged,setLogged]=useState(Boolean(localStorage.getItem("token")));function logout(){localStorage.removeItem("token");setLogged(false);}if(!logged)return <Login onLogin={setLogged}/>;return <Shell onLogout={logout}><Routes><Route path="/" element={<Dashboard/>}/><Route path="/contacts" element={<Contacts/>}/><Route path="/campaigns" element={<Campaigns/>}/><Route path="/settings" element={<SettingsPage/>}/></Routes></Shell>}
